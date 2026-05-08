@@ -1,70 +1,86 @@
 package redactor
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Config holds the full redaction configuration loaded from a file.
+// Config holds the full redactor configuration loaded from a YAML file.
 type Config struct {
-	// UseDefaults merges the built-in rule set before any custom rules.
-	UseDefaults bool         `yaml:"use_defaults" json:"use_defaults"`
-	Rules       []RuleConfig `yaml:"rules"        json:"rules"`
+	Rules       []RuleConfig      `yaml:"rules"`
+	FieldFilter FieldFilterConfig `yaml:"field_filter"`
 }
 
-// LoadConfigFile reads a YAML or JSON config file and returns a Config.
+// RuleConfig is a single regex-based redaction rule.
+type RuleConfig struct {
+	Name        string `yaml:"name"`
+	Pattern     string `yaml:"pattern"`
+	Replacement string `yaml:"replacement"`
+}
+
+// LoadConfigFile reads and parses a YAML config file into a Config struct.
 func LoadConfigFile(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("logfence: reading config %q: %w", path, err)
+		return nil, fmt.Errorf("reading config file: %w", err)
 	}
-
 	var cfg Config
-	switch ext(path) {
-	case ".json":
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return nil, fmt.Errorf("logfence: parsing JSON config: %w", err)
-		}
-	default: // .yaml / .yml and anything else
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return nil, fmt.Errorf("logfence: parsing YAML config: %w", err)
-		}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 	return &cfg, nil
 }
 
-// BuildRedactor constructs a Redactor from a Config, optionally prepending
-// the built-in default rules when cfg.UseDefaults is true.
-func BuildRedactor(cfg *Config) (*Redactor, error) {
-	rules := make([]RuleConfig, 0)
-	if cfg.UseDefaults {
-		rules = append(rules, DefaultRules()...)
+// BuildRedactor constructs a Redactor and FieldFilter from a Config.
+// If cfg is nil, defaults are used.
+func BuildRedactor(cfg *Config) (*Redactor, *FieldFilter, error) {
+	var ruleCfgs []RuleConfig
+	var ffCfg FieldFilterConfig
+
+	if cfg != nil {
+		ruleCfgs = cfg.Rules
+		ffCfg = cfg.FieldFilter
+	} else {
+		ffCfg = DefaultFieldFilterConfig()
 	}
-	rules = append(rules, cfg.Rules...)
-	return New(rules)
+
+	if len(ruleCfgs) == 0 {
+		ruleCfgs = toRuleConfigs(DefaultRules)
+	}
+
+	compiled, err := CompileRules(toRuleConfigsFromInternal(ruleCfgs))
+	if err != nil {
+		return nil, nil, fmt.Errorf("compiling rules: %w", err)
+	}
+
+	r, err := New(compiled)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating redactor: %w", err)
+	}
+
+	return r, NewFieldFilter(ffCfg), nil
 }
 
-// ext returns the lowercase file extension including the leading dot.
 func ext(path string) string {
-	for i := len(path) - 1; i >= 0 && path[i] != '/'; i-- {
-		if path[i] == '.' {
-			return lowercase(path[i:])
-		}
-	}
-	return ""
+	return strings.ToLower(filepath.Ext(path))
 }
 
 func lowercase(s string) string {
-	b := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 32
-		}
-		b[i] = c
+	return strings.ToLower(s)
+}
+
+func toRuleConfigs(rules []DefaultRule) []RuleConfig {
+	out := make([]RuleConfig, len(rules))
+	for i, r := range rules {
+		out[i] = RuleConfig{Name: r.Name, Pattern: r.Pattern, Replacement: r.Replacement}
 	}
-	return string(b)
+	return out
+}
+
+func toRuleConfigsFromInternal(cfgs []RuleConfig) []RuleConfig {
+	return cfgs
 }
