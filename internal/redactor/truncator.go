@@ -79,6 +79,17 @@ func (t *Truncator) Apply(data []byte) []byte {
 	return out
 }
 
+// AppliesTo reports whether the Truncator would consider truncating the named
+// field. It returns true when either no specific fields are configured (meaning
+// all fields are candidates) or the field name is explicitly listed.
+func (t *Truncator) AppliesTo(field string) bool {
+	if len(t.fields) == 0 {
+		return true
+	}
+	_, ok := t.fields[field]
+	return ok
+}
+
 // safeTruncate trims s to at most maxBytes without splitting a UTF-8 rune.
 func safeTruncate(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
