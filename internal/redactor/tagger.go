@@ -49,20 +49,7 @@ func (t *Tagger) Process(entry []byte) ([]byte, error) {
 		return entry, nil
 	}
 
-	var collected []string
-	for _, rule := range t.cfg.Rules {
-		val, ok := obj[rule.Field]
-		if !ok {
-			continue
-		}
-		str, ok := val.(string)
-		if !ok {
-			continue
-		}
-		if strings.Contains(str, rule.Contains) {
-			collected = append(collected, rule.Tags...)
-		}
-	}
+	collected := t.collectTags(obj)
 
 	if len(collected) == 0 {
 		return entry, nil
@@ -80,4 +67,24 @@ func (t *Tagger) Process(entry []byte) ([]byte, error) {
 		return entry, err
 	}
 	return out, nil
+}
+
+// collectTags iterates over all rules and returns the tags that match the given
+// log entry object. Duplicate tags across rules are preserved in order.
+func (t *Tagger) collectTags(obj map[string]interface{}) []string {
+	var collected []string
+	for _, rule := range t.cfg.Rules {
+		val, ok := obj[rule.Field]
+		if !ok {
+			continue
+		}
+		str, ok := val.(string)
+		if !ok {
+			continue
+		}
+		if strings.Contains(str, rule.Contains) {
+			collected = append(collected, rule.Tags...)
+		}
+	}
+	return collected
 }
