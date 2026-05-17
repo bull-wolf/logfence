@@ -10,6 +10,8 @@ import (
 
 // DedupMiddleware drops HTTP log-forwarding requests whose body is an exact
 // duplicate of a recently seen body, within a configurable time window.
+// Only POST requests with non-empty bodies are subject to deduplication;
+// all other requests are passed through unchanged.
 type DedupMiddleware struct {
 	next  http.Handler
 	dedup *redactor.Deduplicator
@@ -36,7 +38,9 @@ func (m *DedupMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 
-	if m.dedup.IsDuplicate(body) {
+	// Skip deduplication check for empty bodies so that empty POSTs
+	// (e.g. heartbeat-style requests) are always forwarded.
+	if len(body) > 0 && m.dedup.IsDuplicate(body) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
